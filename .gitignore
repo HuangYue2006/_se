@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 課程作業
+.DS_Store
+*.db
+node_modules/
+.wrangler/
+.dev.vars
+test-results/
+playwright-report/

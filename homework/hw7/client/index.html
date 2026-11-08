@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>作業清單 (Rust + axum)</title>
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --text:#1f2430; --muted:#6b7280; --line:#e3e6ee; --main:#ce422b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161c; --card:#1d2029; --text:#e8eaf0; --muted:#9aa1b1; --line:#2c303c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:640px; margin:0 auto; padding:28px 16px; }
+  h1 { margin:0 0 4px; } h1 span { color:var(--main); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:14px 0; }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input, select, button { font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); }
+  #title { flex:1; min-width:180px; }
+  button.primary { background:var(--main); color:#fff; border:0; cursor:pointer; }
+  #error { color:#e03131; margin-top:8px; }
+  .progress { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:6px; }
+  #bar { height:100%; background:#2b8a3e; width:0; transition:width .3s; }
+  .filters { display:flex; gap:6px; align-items:center; }
+  .filters button { cursor:pointer; }
+  .filters button.on { background:var(--main); color:#fff; border-color:var(--main); }
+  #clear { margin-left:auto; cursor:pointer; }
+  ul { list-style:none; padding:0; margin:0; }
+  .task { display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line); }
+  .task:last-child { border:0; }
+  .task .title { flex:1; cursor:text; }
+  .task.done .title { text-decoration:line-through; color:var(--muted); }
+  .course { font-size:12px; color:var(--muted); }
+  .pri { font-size:12px; padding:1px 8px; border-radius:10px; background:var(--line); }
+  .p3 .pri { background:#ffe3e3; color:#c92a2a; }
+  .del { border:0; background:none; color:var(--muted); cursor:pointer; }
+  .muted { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🦀 作業清單 <span>Rust</span></h1>
+  <div class="muted">後端 Rust + axum，三種測試：單元測試、Web API 測試、Playwright E2E</div>
+
+  <div class="card">
+    <form id="form">
+      <input id="title" placeholder="要做的作業…" autocomplete="off">
+      <input id="course" placeholder="課程" style="width:120px">
+      <select id="priority" aria-label="優先度"><option value="1">低</option><option value="2" selected>中</option><option value="3">高</option></select>
+      <button class="primary" id="add">新增</button>
+    </form>
+    <div id="error" role="alert" hidden></div>
+  </div>
+
+  <div class="card">
+    <div id="stats" data-testid="stats"></div>
+    <div class="progress"><div id="bar"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="filters">
+      <button data-filter="all" class="on">全部</button>
+      <button data-filter="active">未完成</button>
+      <button data-filter="completed">已完成</button>
+      <button id="clear" hidden>清除已完成</button>
+    </div>
+    <ul id="list"></ul>
+    <p id="empty" class="muted">沒有作業</p>
+  </div>
+  <p class="muted">雙擊作業名稱可以修改</p>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

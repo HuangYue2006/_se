@@ -1,0 +1,17 @@
+name = "deadlinemate"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# 靜態檔（HTML / JS）直接由 Cloudflare 邊緣節點回應，不經過 Worker
+[assets]
+directory = "./public"
+
+# D1 資料庫：先執行 `npx wrangler d1 create deadlinemate`，把印出的 database_id 貼到下面
+[[d1_databases]]
+binding = "DB"
+database_name = "deadlinemate"
+database_id = "請貼上你的-database-id"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true

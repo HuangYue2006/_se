@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeadlineMate 課表與作業提醒</title>
+<meta name="description" content="大學生的課表與作業截止提醒，一句話新增作業、匯出到手機行事曆。">
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --text:#1f2430; --muted:#6b7280; --line:#e3e6ee; --main:#f38020;
+          --overdue:#e03131; --today:#f76707; --soon:#f59f00; --week:#4f7cff; --later:#868e96; --done:#2b8a3e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161c; --card:#1d2029; --text:#e8eaf0; --muted:#9aa1b1; --line:#2c303c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { margin:0; font-size:20px; } header h1 span { color:var(--main); }
+  .tabs { display:flex; gap:4px; flex:1; }
+  .tabs button { background:none; color:var(--muted); border:0; padding:8px 14px; border-radius:8px; font-size:15px; cursor:pointer; }
+  .tabs button.on { background:var(--main); color:#fff; }
+  .clock { color:var(--muted); font-variant-numeric:tabular-nums; font-size:14px; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .card h3 { margin:0 0 10px; font-size:16px; }
+  .stat { font-size:32px; font-weight:bold; }
+  .muted { color:var(--muted); font-size:13px; }
+  .quick { display:flex; gap:8px; } .quick input { flex:1; font-size:16px; padding:10px 12px; }
+  input, select { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:14px; font-family:inherit; }
+  .btn { background:var(--main); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:14px; }
+  .ghost { background:none; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:4px 10px; cursor:pointer; }
+  .ghost.on { background:var(--main); color:#fff; border-color:var(--main); }
+  .hw { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .hw:last-child { border-bottom:0; }
+  .hw .bar { width:6px; align-self:stretch; border-radius:3px; }
+  .hw .info { flex:1; min-width:0; } .hw .title { font-weight:bold; }
+  .hw.isdone .title { text-decoration:line-through; color:var(--muted); }
+  .pill { font-size:12px; padding:2px 8px; border-radius:10px; color:#fff; white-space:nowrap; }
+  .u-overdue { background:var(--overdue); } .u-today { background:var(--today); } .u-soon { background:var(--soon); }
+  .u-week { background:var(--week); } .u-later { background:var(--later); } .u-done { background:var(--done); }
+  table.tt { width:100%; border-collapse:collapse; table-layout:fixed; }
+  table.tt th, table.tt td { border:1px solid var(--line); padding:4px; font-size:12px; text-align:center; height:46px; }
+  table.tt th { background:var(--bg); }
+  .cell { border-radius:6px; color:#fff; padding:4px; height:100%; display:flex; flex-direction:column; justify-content:center; cursor:pointer; }
+  .cell .dot { background:#fff; color:#000; border-radius:8px; font-size:11px; padding:0 5px; margin-top:2px; align-self:center; }
+  .form { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; align-items:center; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:10px 18px; border-radius:8px; opacity:0; transition:.3s; pointer-events:none; }
+  .toast.show { opacity:1; }
+  .load { display:flex; align-items:flex-end; gap:10px; height:90px; }
+  .load div { flex:1; text-align:center; font-size:12px; color:var(--muted); }
+  .load div i { display:block; background:var(--main); border-radius:4px 4px 0 0; margin-bottom:4px; min-height:2px; }
+  code { word-break:break-all; font-size:12px; }
+  footer { text-align:center; color:var(--muted); font-size:12px; padding:20px; }
+  @media (max-width:640px) { table.tt th, table.tt td { font-size:10px; height:38px; } .tabs { order:3; width:100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>📅 Deadline<span>Mate</span></h1>
+  <div class="tabs" id="tabs">
+    <button data-v="dash" class="on">總覽</button><button data-v="table">課表</button>
+    <button data-v="hw">作業</button><button data-v="set">設定</button>
+  </div>
+  <span class="clock" id="clock"></span>
+</header>
+<main id="view"><p class="muted">載入中…</p></main>
+<footer>Cloudflare Workers + D1 · 軟體工程第 9 週作業</footer>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { taipeiNow, parseNaive, urgency, humanize, classesOn, nextClass, weeklyLoad, PERIODS, isoWeekday } from "./lib.js";
+
+const DAYS = ["","一","二","三","四","五","六","日"];
+const ULABEL = { overdue:"已逾期", today:"24 小時內", soon:"3 天內", week:"7 天內", later:"之後", done:"完成" };
+const S = { courses:[], hws:[], me:{}, view:"dash", filter:"pending", key:null };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtDue = (s) => { const d = parseNaive(s); if (!d) return s;
+  return `${d.getUTCMonth()+1}/${d.getUTCDate()}（${DAYS[isoWeekday(d)]}）${s.slice(11,16)}`; };
+function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 2400); }
+
+function store(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+
+async function api(method, url, data) {
+  const r = await fetch("/api/" + url, { method,
+    headers: { "Content-Type":"application/json", "X-User-Key": S.key || "" },
+    body: data ? JSON.stringify(data) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error || r.statusText); e.status = r.status; throw e; }
+  return j;
+}
+
+// ---------- 使用者金鑰：網址 #k=xxx（從其他裝置同步）> localStorage > 新建
+async function ensureKey() {
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get("k");
+  if (fromHash) { S.key = fromHash; store("dm-key", fromHash); history.replaceState(null, "", location.pathname); toast("已同步到這台裝置"); }
+  else S.key = load("dm-key");
+  if (!S.key) { S.key = (await api("POST", "users", { demo:true })).key; store("dm-key", S.key); }
+}
+
+async function refresh() {
+  try {
+    [S.courses, S.hws, S.me] = await Promise.all([api("GET","courses"), api("GET","assignments"), api("GET","me")]);
+  } catch (e) {
+    if (e.status === 401) { S.key = null; store("dm-key", ""); await ensureKey(); return refresh(); }
+    throw e;
+  }
+  const now = taipeiNow();
+  for (const a of S.hws) { const d = parseNaive(a.due); a.urgency = urgency(d, now, a.done); a.remaining = humanize(d, now); }
+  render();
+  notifyCheck();
+}
+
+function render() { $("view").innerHTML = VIEWS[S.view](); }
+$("tabs").onclick = (e) => { if (!e.target.dataset.v) return; S.view = e.target.dataset.v;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b === e.target)); render(); };
+
+function hwRow(a) {
+  return `<div class="hw ${a.done ? "isdone" : ""}">
+    <div class="bar" style="background:${a.color || "#adb5bd"}"></div>
+    <input type="checkbox" ${a.done ? "checked" : ""} data-act="toggle" data-id="${a.id}" aria-label="完成">
+    <div class="info"><div class="title">${esc(a.title)} ${a.priority > 2 ? "❗" : ""}</div>
+      <div class="muted">${esc(a.course_name || "未分類")} · ${fmtDue(a.due)} · ${a.remaining}</div>
+      ${a.note ? `<div class="muted">📝 ${esc(a.note)}</div>` : ""}</div>
+    <span class="pill u-${a.urgency}">${ULABEL[a.urgency]}</span>
+    <button class="ghost" data-act="delhw" data-id="${a.id}" title="刪除">✕</button></div>`;
+}
+
+const VIEWS = {
+  dash() {
+    const now = taipeiNow(), nc = nextClass(S.courses, now), today = classesOn(S.courses, now);
+    const pending = S.hws.filter(a => !a.done);
+    const upcoming = pending.filter(a => ["overdue","today","soon","week"].includes(a.urgency)).slice(0, 8);
+    const wl = weeklyLoad(S.hws, now), max = Math.max(1, ...wl.map(w => w.count));
+    return `
+    <div class="card"><div class="quick">
+      <input id="quick" placeholder="快速新增：軟工 HW3 11/15 23:59、資結 lab5 下週三、網頁 作業2 明天">
+      <button class="btn" data-act="quick">新增</button></div>
+      <div class="muted" style="margin-top:6px">格式：課名(可縮寫) 作業名稱 日期 [時間]。日期可用 11/15、明天、後天、週五、下週三、3天後</div></div>
+    <div class="grid">
+      <div class="card"><h3>⏰ ${nc?.ongoing ? "正在上課" : "下一堂課"}</h3>
+        ${nc ? `<div class="stat" style="font-size:22px;color:${nc.color}">${esc(nc.name)}</div>
+          <div class="muted">${fmtDue(nc.start)} ~ ${nc.end.slice(11)} · ${esc(nc.room)}</div>` : `<div class="muted">還沒有課程，到「課表」新增吧</div>`}</div>
+      <div class="card"><h3>📌 待完成</h3><div class="stat">${pending.length}</div>
+        <div class="muted"><span style="color:var(--overdue)">逾期 ${pending.filter(a=>a.urgency==="overdue").length}</span> ·
+          <span style="color:var(--today)">24h 內 ${pending.filter(a=>a.urgency==="today").length}</span> · 已完成 ${S.hws.length - pending.length}</div></div>
+      <div class="card"><h3>📊 未來四週作業量</h3><div class="load">
+        ${wl.map((w,i) => `<div><i style="height:${w.count/max*60}px"></i>${["本週","下週","+2週","+3週"][i]}<br>${w.count} 份</div>`).join("")}</div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>🔥 即將截止</h3>${upcoming.length ? upcoming.map(hwRow).join("") : `<div class="muted">一週內沒有作業要交</div>`}</div>
+      <div class="card"><h3>📚 今天的課（週${DAYS[isoWeekday(now)]}）</h3>
+        ${today.length ? today.map(c => `<div class="hw"><div class="bar" style="background:${c.color}"></div><div class="info">
+          <div class="title">${esc(c.name)}</div><div class="muted">第 ${c.start_period}-${c.end_period} 節 · ${PERIODS[c.start_period][0]}~${PERIODS[c.end_period][1]} · ${esc(c.room)}</div></div></div>`).join("")
+          : `<div class="muted">今天沒課</div>`}</div>
+    </div>`;
+  },
+  table() {
+    const pending = S.hws.filter(a => !a.done);
+    let rows = "";
+    for (let p = 1; p <= 10; p++) {
+      rows += `<tr><th>${p}<br><span class="muted">${PERIODS[p][0]}</span></th>`;
+      for (let d = 1; d <= 5; d++) {
+        if (S.courses.some(c => c.day === d && c.start_period < p && p <= c.end_period)) continue;
+        const c = S.courses.find(c => c.day === d && c.start_period === p);
+        if (c) {
+          const n = pending.filter(a => a.course_id === c.id).length;
+          rows += `<td rowspan="${c.end_period - c.start_period + 1}"><div class="cell" style="background:${c.color}" data-act="editc" data-id="${c.id}">
+            <b>${esc(c.name)}</b><span>${esc(c.room)}</span>${n ? `<span class="dot">${n} 份作業</span>` : ""}</div></td>`;
+        } else rows += "<td></td>";
+      }
+      rows += "</tr>";
+    }
+    const opt = (n, sel) => [...Array(n)].map((_, i) => `<option ${i + 1 === sel ? "selected" : ""}>${i + 1}</option>`).join("");
+    return `<div class="card"><h3>我的課表 <span class="muted">（點課程可編輯）</span></h3>
+      <table class="tt"><tr><th style="width:60px">節</th>${[1,2,3,4,5].map(d=>`<th>週${DAYS[d]}</th>`).join("")}</tr>${rows}</table></div>
+      <div class="card"><h3 id="cformTitle">新增課程</h3><div class="form">
+        <input id="c_name" placeholder="課名"><input id="c_code" placeholder="課號"><input id="c_room" placeholder="教室">
+        <select id="c_day">${[1,2,3,4,5,6,7].map(d=>`<option value="${d}">週${DAYS[d]}</option>`).join("")}</select>
+        <select id="c_start" aria-label="開始節次">${opt(10, 1)}</select><select id="c_end" aria-label="結束節次">${opt(10, 3)}</select>
+        <input id="c_color" type="color" value="#4f7cff">
+        <button class="btn" data-act="savec">儲存</button>
+        <button class="ghost" id="c_del" style="display:none" data-act="delc">刪除課程</button>
+        <input type="hidden" id="c_id"></div></div>`;
+  },
+  hw() {
+    const f = S.filter, list = S.hws.filter(a => f === "all" || (f === "done" ? a.done : !a.done));
+    return `<div class="card"><h3>新增作業</h3><div class="form">
+        <select id="h_course"><option value="">（未分類）</option>${S.courses.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
+        <input id="h_title" placeholder="作業名稱"><input id="h_due" type="datetime-local">
+        <select id="h_pri"><option value="1">低</option><option value="2" selected>中</option><option value="3">高</option></select>
+        <input id="h_note" placeholder="備註"><button class="btn" data-act="addhw">新增</button></div></div>
+      <div class="card"><div>${[["pending","未完成"],["done","已完成"],["all","全部"]].map(([k,t]) =>
+        `<button class="ghost ${f===k?"on":""}" data-act="filter" data-f="${k}">${t}</button>`).join(" ")}</div>
+        ${list.length ? list.map(hwRow).join("") : `<p class="muted">沒有作業</p>`}</div>`;
+  },
+  set() {
+    const cal = `${location.origin}/cal/${S.key}.ics`;
+    const sync = `${location.origin}/#k=${S.key}`;
+    return `<div class="card"><h3>📆 訂閱到 Google 日曆 / iPhone 行事曆</h3>
+        <p><code>${esc(cal)}</code></p><button class="ghost" data-act="copy" data-v="${esc(cal)}">複製網址</button>
+        <a href="${esc(cal)}"><button class="btn">下載 .ics</button></a>
+        <p class="muted">Google 日曆 → 其他日曆 ＋ → 透過網址新增。課程每週重複 18 週；作業截止前 1 天、1 小時提醒。</p></div>
+      <div class="card"><h3>📱 在其他裝置使用</h3>
+        <p class="muted">用手機打開這個連結，就會看到同一份課表（請不要分享給別人）：</p>
+        <p><code>${esc(sync)}</code></p><button class="ghost" data-act="copy" data-v="${esc(sync)}">複製連結</button></div>
+      <div class="card"><h3>學期開始日</h3><input type="date" id="sem" value="${esc(S.me.semester_start || "")}">
+        <button class="btn" data-act="sem">儲存</button></div>
+      <div class="card"><h3>🔔 瀏覽器通知</h3>
+        <p class="muted">開著網頁時，作業剩 24 小時、1 小時會跳通知。狀態：<b>${"Notification" in window ? Notification.permission : "不支援"}</b></p>
+        <button class="btn" data-act="notify">允許通知</button></div>
+      <div class="card"><h3>⚠️ 刪除我的資料</h3><button class="ghost" data-act="wipe">刪除全部資料並重新開始</button></div>`;
+  },
+};
+
+// ---------- 事件（用事件委派，一個 listener 處理所有按鈕）
+const ACTIONS = {
+  async quick() {
+    const el = $("quick");
+    try { const r = await api("POST","quick",{ text: el.value }); toast(`已新增「${r.title}」，截止 ${fmtDue(r.due)}`); el.value = ""; refresh(); }
+    catch (e) { toast("❌ " + e.message); }
+  },
+  async toggle(el) { await api("PUT", "assignments/" + el.dataset.id, { done: el.checked }); toast(el.checked ? "完成！👏" : "已改回未完成"); refresh(); },
+  async delhw(el) { if (confirm("刪除這份作業？")) { await api("DELETE", "assignments/" + el.dataset.id); refresh(); } },
+  async addhw() {
+    try { await api("POST","assignments",{ course_id: $("h_course").value || null, title: $("h_title").value, due: $("h_due").value,
+                                           priority: +$("h_pri").value, note: $("h_note").value });
+          toast("已新增"); refresh(); } catch (e) { toast("❌ " + e.message); }
+  },
+  filter(el) { S.filter = el.dataset.f; render(); },
+  editc(el) {
+    const c = S.courses.find(c => c.id === +el.dataset.id);
+    for (const k of ["name","code","room","day","color"]) $("c_" + k).value = c[k] ?? "";
+    $("c_start").value = c.start_period; $("c_end").value = c.end_period; $("c_id").value = c.id;
+    $("cformTitle").textContent = "編輯課程：" + c.name; $("c_del").style.display = "";
+    $("c_name").scrollIntoView({ behavior:"smooth" });
+  },
+  async savec() {
+    const id = $("c_id").value;
+    const data = { name:$("c_name").value, code:$("c_code").value, room:$("c_room").value, day:+$("c_day").value,
+                   start_period:+$("c_start").value, end_period:+$("c_end").value, color:$("c_color").value };
+    const url = "courses" + (id ? "/" + id : "");
+    try { await api(id ? "PUT" : "POST", url, data); toast("已儲存"); refresh(); }
+    catch (e) {
+      if (e.status === 409 && confirm(e.message + "，仍要儲存嗎？")) { await api(id ? "PUT" : "POST", url + "?force=1", data); refresh(); }
+      else if (e.status !== 409) toast("❌ " + e.message);
+    }
+  },
+  async delc() { if (confirm("刪除課程？（作業會保留為未分類）")) { await api("DELETE", "courses/" + $("c_id").value); refresh(); } },
+  async sem() { try { await api("PUT","me",{ semester_start: $("sem").value }); toast("已儲存"); } catch (e) { toast("❌ " + e.message); } },
+  copy(el) { navigator.clipboard.writeText(el.dataset.v).then(() => toast("已複製")); },
+  notify() { Notification.requestPermission().then(render); },
+  async wipe() {
+    if (!confirm("確定刪除全部課程與作業？這個動作無法復原。")) return;
+    await api("DELETE","me"); S.key = null; store("dm-key", ""); location.reload();
+  },
+};
+document.addEventListener("click", (e) => { const el = e.target.closest("[data-act]"); if (el && el.type !== "checkbox") ACTIONS[el.dataset.act]?.(el); });
+document.addEventListener("change", (e) => { const el = e.target; if (el.dataset?.act === "toggle") ACTIONS.toggle(el); });
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "quick") ACTIONS.quick(); });
+
+// ---------- 通知
+function notifyCheck() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  let sent = {};
+  try { sent = JSON.parse(load("dm-notified") || "{}"); } catch {}
+  const now = taipeiNow();
+  for (const a of S.hws) {
+    if (a.done) continue;
+    const left = parseNaive(a.due) - now;
+    for (const [lvl, ms, txt] of [["1h", 3600e3, "1 小時內"], ["24h", 86400e3, "24 小時內"]]) {
+      if (left > 0 && left <= ms && !sent[a.id + lvl]) {
+        new Notification(`⏰ ${a.title} ${txt}截止`, { body: `${a.course_name || ""} ${fmtDue(a.due)}` });
+        sent[a.id + lvl] = 1; break;
+      }
+    }
+  }
+  store("dm-notified", JSON.stringify(sent));
+}
+
+const tick = () => { $("clock").textContent = `台灣時間 ${taipeiNow().toISOString().slice(0, 16).replace("T", " ")}`; };
+tick(); setInterval(tick, 10_000);
+setInterval(refresh, 60_000);
+
+ensureKey().then(refresh).catch((e) => { $("view").innerHTML = `<div class="card">❌ 無法連線：${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>

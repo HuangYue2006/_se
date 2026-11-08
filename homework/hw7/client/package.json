@@ -1,0 +1,8 @@
+{
+  "name": "hw7-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金大校務系統（迷你版）</title>
+<style>
+  :root { --main:#1d4e89; --main2:#2f6eb5; --bg:#f3f5f9; --line:#d8dee8; --ok:#2e7d32; --bad:#c62828; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; background:var(--bg); color:#222; }
+  header { background:var(--main); color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; flex:1; }
+  header .who { font-size:14px; }
+  header button { background:#fff2; color:#fff; border:1px solid #fff6; }
+  .layout { display:flex; min-height:calc(100vh - 52px); }
+  nav { width:200px; background:#fff; border-right:1px solid var(--line); padding:12px 0; }
+  nav a { display:block; padding:10px 20px; color:#333; text-decoration:none; cursor:pointer; }
+  nav a.active, nav a:hover { background:#e7eef8; color:var(--main); font-weight:bold; }
+  main { flex:1; padding:20px; overflow-x:auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  table { border-collapse:collapse; width:100%; background:#fff; }
+  th, td { border:1px solid var(--line); padding:8px; text-align:left; font-size:14px; }
+  th { background:#eef2f8; }
+  button { background:var(--main2); color:#fff; border:0; border-radius:4px; padding:6px 12px; cursor:pointer; font-size:14px; }
+  button.danger { background:var(--bad); }
+  button:disabled { background:#aaa; cursor:not-allowed; }
+  input, select, textarea { padding:6px 8px; border:1px solid var(--line); border-radius:4px; font-size:14px; }
+  .login { max-width:360px; margin:80px auto; }
+  .login input { width:100%; margin:6px 0 12px; }
+  .msg { padding:8px 12px; border-radius:4px; margin:8px 0; display:none; }
+  .msg.err { background:#fdecea; color:var(--bad); display:block; }
+  .msg.ok { background:#e8f5e9; color:var(--ok); display:block; }
+  .tt td { height:44px; text-align:center; font-size:12px; width:16%; }
+  .tt td.has { background:#dbe8f8; font-weight:bold; }
+  .badge { font-size:12px; padding:2px 6px; border-radius:10px; background:#eee; }
+  .badge.req { background:#ffe0b2; }
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+  @media (max-width:700px) { nav { width:100%; display:flex; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line); padding:0; }
+    nav a { white-space:nowrap; } .layout { flex-direction:column; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎓 國立金門大學 校務行政系統</h1>
+  <span class="who" id="who"></span>
+  <button id="logoutBtn" style="display:none" onclick="logout()">登出</button>
+</header>
+
+<div id="loginView" class="card login">
+  <h2>登入</h2>
+  <label>帳號 <input id="acc" autocomplete="username"></label>
+  <label>密碼 <input id="pw" type="password" autocomplete="current-password"></label>
+  <button style="width:100%" onclick="login()">登入</button>
+  <div id="loginMsg" class="msg"></div>
+  <p style="font-size:13px;color:#666">測試帳號：學生 s001 / 1234、老師 t001 / 1234、管理員 admin / admin</p>
+</div>
+
+<div id="appView" class="layout" style="display:none">
+  <nav id="nav"></nav>
+  <main><div id="msg" class="msg"></div><div id="page"></div></main>
+</div>
+
+<script>
+const DAYS = ["", "一", "二", "三", "四", "五"];
+let me = null;
+
+const MENUS = {
+  student: [["home","公告"],["courses","課程查詢 / 選課"],["timetable","我的課表"],["grades","成績查詢"],["profile","個人資料"]],
+  teacher: [["home","公告"],["teaching","授課課程 / 成績登錄"],["courses","全校課程"],["post","發布公告"],["profile","個人資料"]],
+  admin:   [["home","公告"],["courses","全校課程"],["addCourse","開設課程"],["post","發布公告"],["profile","個人資料"]],
+};
+
+async function api(method, url, data) {
+  const r = await fetch("/api/" + url, { method, headers: {"Content-Type":"application/json"},
+                                          body: data ? JSON.stringify(data) : undefined });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function flash(text, ok=true) { const m = document.getElementById("msg"); m.className = "msg " + (ok?"ok":"err"); m.textContent = text;
+  clearTimeout(flash.t); flash.t = setTimeout(() => m.className = "msg", 3000); }
+const period = c => `週${DAYS[c.day]} 第${c.start_period}-${c.end_period}節`;
+
+async function login() {
+  try { me = await api("POST","login",{account:acc.value.trim(), password:pw.value}); start(); }
+  catch (e) { loginMsg.className = "msg err"; loginMsg.textContent = e.message; }
+}
+pw.addEventListener("keydown", e => e.key === "Enter" && login());
+async function logout() { await api("POST","logout"); location.reload(); }
+
+function start() {
+  loginView.style.display = "none"; appView.style.display = "flex"; logoutBtn.style.display = "";
+  const roleName = {student:"學生",teacher:"教師",admin:"管理員"}[me.role];
+  who.textContent = `${me.name}（${roleName} ${me.account}）`;
+  nav.innerHTML = MENUS[me.role].map(([k,t]) => `<a data-k="${k}" onclick="go('${k}')">${t}</a>`).join("");
+  go("home");
+}
+
+async function go(k) {
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.k === k));
+  try { page.innerHTML = await PAGES[k](); } catch (e) { flash(e.message, false); }
+}
+
+const PAGES = {
+  async home() {
+    const list = await api("GET","announcements");
+    return `<h2>最新公告</h2>` + list.map(a => `<div class="card"><h3 style="margin-top:0">${esc(a.title)}</h3>
+      <p>${esc(a.content)}</p><small style="color:#888">${esc(a.author)} · ${esc(a.created_at)}</small></div>`).join("");
+  },
+  async courses() {
+    const [all, mine] = await Promise.all([api("GET","courses"), me.role==="student" ? api("GET","my-courses") : []]);
+    const mineIds = new Set(mine.map(c => c.id));
+    const credits = mine.reduce((s,c) => s + c.credits, 0);
+    return `<h2>課程查詢${me.role==="student" ? " / 選課" : ""}</h2>
+      ${me.role==="student" ? `<p>目前已選 <b>${credits}</b> 學分（上限 25）</p>` : ""}
+      <input placeholder="搜尋課名、課號或老師" oninput="filterRows(this.value)" style="width:260px;margin-bottom:8px">
+      <table id="ctable"><tr><th>課號</th><th>課名</th><th>類別</th><th>學分</th><th>老師</th><th>時間</th><th>教室</th><th>人數</th>${me.role==="student"?"<th>操作</th>":""}</tr>
+      ${all.map(c => `<tr><td>${c.code}</td><td>${esc(c.name)}</td>
+        <td><span class="badge ${c.required?"req":""}">${c.required?"必修":"選修"}</span></td><td>${c.credits}</td>
+        <td>${esc(c.teacher)}</td><td>${period(c)}</td><td>${esc(c.room)}</td><td>${c.enrolled}/${c.capacity}</td>
+        ${me.role==="student" ? `<td>${mineIds.has(c.id)
+            ? `<button class="danger" onclick="dropCourse(${c.id})">退選</button>`
+            : `<button onclick="enroll(${c.id})" ${c.enrolled>=c.capacity?"disabled":""}>加選</button>`}</td>` : ""}</tr>`).join("")}
+      </table>`;
+  },
+  async timetable() {
+    const mine = await api("GET","my-courses");
+    let rows = "";
+    for (let p = 1; p <= 10; p++) {
+      rows += `<tr><th>第${p}節</th>`;
+      for (let d = 1; d <= 5; d++) {
+        const c = mine.find(c => c.day === d && c.start_period <= p && p <= c.end_period);
+        rows += c ? `<td class="has">${esc(c.name)}<br><small>${esc(c.room)}</small></td>` : "<td></td>";
+      }
+      rows += "</tr>";
+    }
+    return `<h2>我的課表</h2><table class="tt"><tr><th></th>${[1,2,3,4,5].map(d=>`<th>週${DAYS[d]}</th>`).join("")}</tr>${rows}</table>`;
+  },
+  async grades() {
+    const t = await api("GET","grades");
+    return `<h2>成績查詢</h2><div class="card">GPA：<b>${t.gpa ?? "—"}</b>　已取得學分：<b>${t.earned_credits}</b></div>
+      <table><tr><th>課號</th><th>課名</th><th>學分</th><th>分數</th><th>等第</th><th>GP</th></tr>
+      ${t.items.map(i => `<tr><td>${i.code}</td><td>${esc(i.name)}</td><td>${i.credits}</td>
+        <td style="color:${i.score!=null && i.score<60 ? "var(--bad)" : ""}">${i.score ?? "未送出"}</td>
+        <td>${i.letter ?? "—"}</td><td>${i.point ?? "—"}</td></tr>`).join("")}</table>`;
+  },
+  async teaching() {
+    const list = await api("GET","teaching");
+    return `<h2>授課課程</h2>` + list.map(c => `<div class="card"><b>${c.code} ${esc(c.name)}</b>　${period(c)}　${esc(c.room)}
+      　修課 ${c.enrolled} 人 <button onclick="roster(${c.id}, this)">學生名單 / 登錄成績</button><div id="r${c.id}"></div></div>`).join("");
+  },
+  async post() {
+    return `<h2>發布公告</h2><div class="card"><input id="atitle" placeholder="標題" style="width:100%;margin-bottom:8px">
+      <textarea id="acontent" rows="6" placeholder="內容" style="width:100%"></textarea><br><br>
+      <button onclick="postAnn()">發布</button></div>`;
+  },
+  async addCourse() {
+    const ts = await api("GET","teachers");
+    return `<h2>開設課程</h2><div class="card form-grid">
+      <input id="c_code" placeholder="課號 (如 CS301)"><input id="c_name" placeholder="課名">
+      <select id="c_teacher">${ts.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>
+      <input id="c_credits" type="number" placeholder="學分" value="3">
+      <select id="c_day">${[1,2,3,4,5].map(d=>`<option value="${d}">週${DAYS[d]}</option>`).join("")}</select>
+      <input id="c_start" type="number" placeholder="開始節次" value="2"><input id="c_end" type="number" placeholder="結束節次" value="4">
+      <input id="c_room" placeholder="教室"><input id="c_cap" type="number" placeholder="人數上限" value="50">
+      <label><input id="c_req" type="checkbox"> 必修</label>
+      <button onclick="addCourse()">新增</button></div>`;
+  },
+  async profile() {
+    const u = await api("GET","me");
+    return `<h2>個人資料</h2><div class="card"><table>
+      <tr><th>帳號</th><td>${u.account}</td></tr><tr><th>姓名</th><td>${esc(u.name)}</td></tr>
+      <tr><th>系所</th><td>${esc(u.dept ?? "—")}</td></tr>${u.grade ? `<tr><th>年級</th><td>${u.grade}</td></tr>` : ""}
+      <tr><th>Email</th><td><input id="pemail" value="${esc(u.email)}"> <button onclick="saveEmail()">儲存</button></td></tr></table></div>
+      <div class="card"><h3>修改密碼</h3><input id="oldpw" type="password" placeholder="舊密碼">
+      <input id="newpw" type="password" placeholder="新密碼"> <button onclick="changePw()">修改</button></div>`;
+  },
+};
+
+function filterRows(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll("#ctable tr").forEach((tr,i) => { if (i) tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none"; });
+}
+async function enroll(id) { try { await api("POST","enroll",{course_id:id}); flash("加選成功"); go("courses"); } catch(e) { flash(e.message,false); } }
+async function dropCourse(id) { if (!confirm("確定退選？")) return;
+  try { await api("DELETE","enroll/"+id); flash("退選成功"); go("courses"); } catch(e) { flash(e.message,false); } }
+async function roster(cid, btn) {
+  const list = await api("GET","roster/"+cid);
+  document.getElementById("r"+cid).innerHTML = `<table style="margin-top:8px"><tr><th>學號</th><th>姓名</th><th>年級</th><th>成績</th><th></th></tr>
+    ${list.map(s => `<tr><td>${s.account}</td><td>${esc(s.name)}</td><td>${s.grade}</td>
+      <td><input id="sc${cid}_${s.id}" type="number" min="0" max="100" value="${s.score ?? ""}" style="width:80px"></td>
+      <td><button onclick="saveScore(${cid},${s.id})">儲存</button></td></tr>`).join("")}</table>`;
+}
+async function saveScore(cid, sid) {
+  try { await api("PUT","score",{course_id:cid, student_id:sid, score:document.getElementById(`sc${cid}_${sid}`).value}); flash("成績已儲存"); }
+  catch(e) { flash(e.message,false); }
+}
+async function postAnn() {
+  try { await api("POST","announcements",{title:atitle.value, content:acontent.value}); flash("公告已發布"); go("home"); }
+  catch(e) { flash(e.message,false); }
+}
+async function addCourse() {
+  try { await api("POST","courses",{code:c_code.value, name:c_name.value, teacher_id:+c_teacher.value, credits:c_credits.value,
+          day:c_day.value, start_period:c_start.value, end_period:c_end.value, room:c_room.value, capacity:c_cap.value, required:c_req.checked});
+        flash("課程已新增"); go("courses"); } catch(e) { flash(e.message,false); }
+}
+async function saveEmail() { try { await api("PUT","me",{email:pemail.value}); flash("已儲存"); } catch(e) { flash(e.message,false); } }
+async function changePw() { try { await api("PUT","me",{old_password:oldpw.value,new_password:newpw.value}); flash("密碼已修改"); go("profile"); }
+  catch(e) { flash(e.message,false); } }
+
+api("GET","me").then(u => { me = u; start(); }).catch(() => {});
+</script>
+</body>
+</html>

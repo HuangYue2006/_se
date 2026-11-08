@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker 作業看板</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e2e6ef; --main:#2496ed; --bad:#e03131; --ok:#2b8a3e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151c; --card:#1c2029; --text:#e6e9f0; --muted:#9aa1b1; --line:#2b303b; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:900px; margin:0 auto; padding:24px 16px; }
+  h1 { margin:0 0 4px; } h1 span { color:var(--main); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:14px 0; }
+  .arch { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:14px; }
+  .box { border:2px solid var(--main); border-radius:8px; padding:8px 12px; text-align:center; }
+  .box small { display:block; color:var(--muted); }
+  .arrow { color:var(--muted); }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input, button { font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); }
+  button { background:var(--main); color:#fff; border:0; cursor:pointer; }
+  .row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border:0; }
+  .row .t { flex:1; } .row.done .t b { text-decoration:line-through; color:var(--muted); }
+  .muted { color:var(--muted); font-size:13px; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:10px; color:#fff; background:var(--bad); }
+  .del { background:none; color:var(--muted); border:1px solid var(--line); padding:4px 10px; }
+  code { font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🐳 Docker <span>作業看板</span></h1>
+  <div class="muted">nginx + FastAPI + PostgreSQL，全部跑在 docker compose 裡</div>
+
+  <div class="card">
+    <div class="arch">
+      <div class="box">瀏覽器<small>:8080</small></div><span class="arrow">→</span>
+      <div class="box">nginx<small>靜態檔 + 反向代理</small></div><span class="arrow">/api →</span>
+      <div class="box">FastAPI<small id="apiHost">api:8000</small></div><span class="arrow">→</span>
+      <div class="box">PostgreSQL<small id="pgVer">db:5432</small></div>
+    </div>
+    <p class="muted" id="health">檢查服務中…</p>
+  </div>
+
+  <div class="card">
+    <form id="f">
+      <input id="course" placeholder="課程" required>
+      <input id="title" placeholder="作業名稱" required style="flex:1">
+      <input id="due" type="datetime-local" required>
+      <button>新增</button>
+    </form>
+  </div>
+
+  <div class="card" id="list"></div>
+  <div class="card"><b>各課程完成度</b><div id="stats"></div></div>
+</main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(method, url, data) {
+  const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: data ? JSON.stringify(data) : undefined });
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+async function load() {
+  try {
+    const h = await api("GET", "/api/health");
+    apiHost.textContent = "容器 " + h.api_container;
+    pgVer.textContent = h.postgres;
+    health.innerHTML = `✅ API 與資料庫連線正常，資料表共 <b>${h.rows}</b> 筆`;
+  } catch (e) { health.textContent = "❌ API 無法連線：" + e.message; }
+  const items = await api("GET", "/api/assignments");
+  list.innerHTML = items.length ? items.map(a => `<div class="row ${a.done ? "done" : ""}">
+      <input type="checkbox" ${a.done ? "checked" : ""} onchange="toggle(${a.id}, this.checked)">
+      <div class="t"><b>${esc(a.title)}</b> <div class="muted">${esc(a.course)} · 截止 ${a.due.replace("T"," ").slice(0,16)}</div></div>
+      ${a.overdue ? '<span class="tag">逾期</span>' : ""}
+      <button class="del" onclick="del(${a.id})">刪除</button></div>`).join("") : '<p class="muted">沒有作業</p>';
+  const st = await api("GET", "/api/stats");
+  stats.innerHTML = st.map(s => `<div class="row"><div class="t">${esc(s.course)}</div><div>${s.done} / ${s.total}</div></div>`).join("");
+}
+async function toggle(id, done) { await api("PATCH", `/api/assignments/${id}`, {done}); load(); }
+async function del(id) { if (confirm("刪除？")) { await api("DELETE", `/api/assignments/${id}`); load(); } }
+f.onsubmit = async e => {
+  e.preventDefault();
+  try { await api("POST", "/api/assignments", {course: course.value, title: title.value, due: due.value}); f.reset(); load(); }
+  catch (err) { alert(err.message); }
+};
+load();
+</script>
+</body>
+</html>
